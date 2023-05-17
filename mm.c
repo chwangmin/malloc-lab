@@ -14,6 +14,7 @@
 #include <assert.h>
 #include <unistd.h>
 #include <string.h>
+#include <limits.h>
 
 #include "mm.h"
 #include "memlib.h"
@@ -21,7 +22,7 @@
 
 static void place(void *, size_t );
 
-static void *find_fit(size_t );
+static void *find_best_fit(size_t );
 
 static void *coalesce(void *);
 
@@ -234,7 +235,7 @@ void *mm_malloc(size_t size)
         asize = DSIZE * ((size + (DSIZE) + (DSIZE-1))/DSIZE);
     
     // 들어갈 위치를 찾았다면
-    if ((bp = find_fit(asize)) != NULL){
+    if ((bp = find_best_fit(asize)) != NULL){
         // bp에 asize만큼 할당하기.
         place(bp, asize);
         return bp;
@@ -259,17 +260,22 @@ void *mm_malloc(size_t size)
     // }
 }
 
-static void *find_fit(size_t asize)
+static void *find_best_fit(size_t asize)
 {
     void *bp;
+    void *tmp_bp;
+    size_t tmp_size = ULONG_MAX;
 
     // bp는 heaplistp, 얻은 사이즈가 0보다 클때까지, bp는 다음 블록으로
     for (bp = heap_listp; GET_SIZE(HDRP(bp))>0; bp = NEXT_BLKP(bp)){
         // 만약 확인하는 블록에 할당이 안되있고, asize보다 크기가 더 크다면,
-        if(!GET_ALLOC(HDRP(bp))&&(asize <= GET_SIZE(HDRP(bp)))){
-            // 이 포인터(주소)를 리턴.
-            return bp; 
+        if(!GET_ALLOC(HDRP(bp))&&(asize <= GET_SIZE(HDRP(bp))&&(tmp_size>GET_SIZE(HDRP(bp))))){
+            tmp_size = GET_SIZE(HDRP(bp));
+            tmp_bp = bp;
         }
+    }
+    if (tmp_size != ULONG_MAX){
+        return tmp_bp;
     }
     return NULL;
 }
