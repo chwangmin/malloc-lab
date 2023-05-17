@@ -23,6 +23,8 @@ static void place(void *, size_t );
 
 static void *find_fit(size_t );
 
+static void *find_next_fit(size_t );
+
 static void *coalesce(void *);
 
 static void *extend_heap(size_t );
@@ -91,6 +93,7 @@ team_t team = {
 // 그 전 블록의 bp 위치로 이동. (이전 블록 footer로 이동하면 그 전 블록의 사이즈를 알 수 있으니 그만큼 그 전으로 이동.)
 #define PREV_BLKP(bp)   ((char *)(bp) - GET_SIZE(((char *)(bp)-DSIZE)))
 static char *heap_listp; // 처음에 쓸 큰 가용블록 힙을 만들어줌
+static char *heap_listp_next; // next-fit 다음 위치 저장 -> init, place, coalesce
 
 /* 
  * mm_init - initialize the malloc package.
@@ -110,6 +113,7 @@ int mm_init(void)
     PUT(heap_listp + (3*WSIZE), PACK(0,1));
     // heap_listp(나중에 bp) 가 가리키는 부분은 header와 footer의 중간으로 지정.
     heap_listp += (2*WSIZE);
+    heap_listp_next = heap_listp;
 
     // 두 가지 다른 경우에 호출
     // 1. 힙이 초기화 될때, 2. mm_malloc이 적당한 맞춤 fit을 찾지 못할때 -이해중
@@ -190,6 +194,8 @@ static void *coalesce(void *bp)
         // 이전의 헤더 WSIZE 추가의 포인터를 bp로 설정
         bp = PREV_BLKP(bp);
     }
+	heap_listp_next = bp;
+
     return bp;
 }
 
@@ -234,7 +240,7 @@ void *mm_malloc(size_t size)
         asize = DSIZE * ((size + (DSIZE) + (DSIZE-1))/DSIZE);
     
     // 들어갈 위치를 찾았다면
-    if ((bp = find_fit(asize)) != NULL){
+    if ((bp = find_next_fit(asize)) != NULL){
         // bp에 asize만큼 할당하기.
         place(bp, asize);
         return bp;
@@ -259,12 +265,23 @@ void *mm_malloc(size_t size)
     // }
 }
 
-static void *find_fit(size_t asize)
+static void *find_next_fit(size_t asize)
 {
     void *bp;
 
+    // bp는 heaplistp_next, 얻은 사이즈가 0보다 클때까지, bp는 다음 블록으로
+    for (bp = heap_listp_next; GET_SIZE(HDRP(bp))>0; bp = NEXT_BLKP(bp)){
+        // 만약 확인하는 블록에 할당이 안되있고, asize보다 크기가 더 크다면,
+        if(!GET_ALLOC(HDRP(bp))&&(asize <= GET_SIZE(HDRP(bp)))){
+            // 이 포인터(주소)를 리턴.
+            return bp;
+        }
+    }
     // bp는 heaplistp, 얻은 사이즈가 0보다 클때까지, bp는 다음 블록으로
     for (bp = heap_listp; GET_SIZE(HDRP(bp))>0; bp = NEXT_BLKP(bp)){
+        if (bp == heap_listp_next){
+            break;
+        }
         // 만약 확인하는 블록에 할당이 안되있고, asize보다 크기가 더 크다면,
         if(!GET_ALLOC(HDRP(bp))&&(asize <= GET_SIZE(HDRP(bp)))){
             // 이 포인터(주소)를 리턴.
