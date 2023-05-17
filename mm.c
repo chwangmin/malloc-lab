@@ -113,7 +113,6 @@ int mm_init(void)
     PUT(heap_listp + (3*WSIZE), PACK(0,1));
     // heap_listp(나중에 bp) 가 가리키는 부분은 header와 footer의 중간으로 지정.
     heap_listp += (2*WSIZE);
-    //heap_listp_next = heap_listp;
     heap_listp_next = heap_listp;
 
     // 두 가지 다른 경우에 호출
@@ -157,7 +156,6 @@ static void *coalesce(void *bp)
     // 전 블록의 footer의 allocate가 1이고 다음 블록의 header의 allocate가 1이라면
     if (prev_alloc && next_alloc){
         // 그냥 bp 리턴(똑같은거 다시 돌려보네주기)
-        heap_listp_next = bp;
         return bp;
     }
 
@@ -196,7 +194,7 @@ static void *coalesce(void *bp)
         // 이전의 헤더 WSIZE 추가의 포인터를 bp로 설정
         bp = PREV_BLKP(bp);
     }
-    heap_listp_next = bp;
+	heap_listp_next = bp;
 
     return bp;
 }
@@ -316,7 +314,6 @@ static void place(void *bp, size_t asize)
         PUT(HDRP(bp), PACK(csize,1));
         PUT(FTRP(bp), PACK(csize,1));
     }
-    heap_listp_next = bp;
 }
 
 /*
