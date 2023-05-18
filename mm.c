@@ -27,6 +27,10 @@ static void *coalesce(void *);
 
 static void *extend_heap(size_t );
 
+static void add_free_block(void *);
+
+static void splice_free_block(void *);
+
 /*********************************************************
  * NOTE TO STUDENTS: Before you do anything else, please
  * provide your team information in the following struct.
@@ -71,7 +75,7 @@ team_t team = {
 // 다른 블록을 가리키거나 이동할 때 쓸 수 있다.
 #define GET(p)      (*(unsigned int *)(p))
 // 블록의 주소를 담는다. 위치를 담아야지 나중에 헤더나 푸터를 읽어서 이동 혹은 연결할 수 있다.
-#define PUT(p, val) (*(unsigned int *)(p) = (val))
+#define PUT(p, val) (*(unsigned int *)(p) = (unsigned int)(val))
 
 /* adress p위치로부터 size를 읽고 field를 할당 */
 // '~'은 역수니까 1111_1000이 됨. 비트 연산하면 000 앞에거만 가져올 수 있음. 즉, 헤더에서 블록 size만 가져오겠다.
@@ -92,22 +96,31 @@ team_t team = {
 #define PREV_BLKP(bp)   ((char *)(bp) - GET_SIZE(((char *)(bp)-DSIZE)))
 static char *heap_listp; // 처음에 쓸 큰 가용블록 힙을 만들어줌
 
+/* Explicit List (명시적 리스트) 구현 */
+#define GET_SUCC(bp) (*(void **)((char *)(bp) + WSIZE)) // 4byte만큼 앞에있는 주소의 주소 가져오기
+#define GET_PRED(bp) (*(void **)(bp)) // 그 주소의 주소 가져오기
+
 /* 
  * mm_init - initialize the malloc package.
  * 최초 가용 블록으로 힙 생성하기
  */
 int mm_init(void)
 {
-    if ((heap_listp = mem_sbrk(4*WSIZE)) == (void *)-1)
+    // 컴퓨터가 데이터가 주고받는 단위(버스)가 32byte정도기 때문에 24byte로 설정하면 8byte가 남아 또 보네줘야 하기 때문에 더 느리다.
+    if ((heap_listp = mem_sbrk(6*WSIZE)) == (void *)-1)
         return -1;
     // alignment : heap_listp 첫번째는 0 (패딩)
     PUT(heap_listp, 0);
     // Prologue header : heap_listp + 4byte 에는 header 저장 (DSIZE, 1)
-    PUT(heap_listp + (1*WSIZE), PACK(DSIZE, 1));
+    PUT(heap_listp + (1*WSIZE), PACK(4*WSIZE, 1));
+    // 이전 가용 블록의 주소 - 이해중
+    PUT(heap_listp + (2*WSIZE), NULL);
+    // 다음 가용 블록의 주소 - 이해중
+    PUT(heap_listp + (3*WSIZE), NULL);
     // Prologue footer : heap_listp + 8byte 에는 footer 저장 (header와 같음) footer은 header와 같은 양식
-    PUT(heap_listp + (2*WSIZE), PACK(DSIZE, 1));
+    PUT(heap_listp + (4*WSIZE), PACK(4*WSIZE, 1));
     // Epilogue header : heap_listp + 12byte 에는 마지막을 알려주는 size: 0, allocate : 1
-    PUT(heap_listp + (3*WSIZE), PACK(0,1));
+    PUT(heap_listp + (5*WSIZE), PACK(0,1));
     // heap_listp(나중에 bp) 가 가리키는 부분은 header와 footer의 중간으로 지정.
     heap_listp += (2*WSIZE);
 
@@ -151,12 +164,15 @@ static void *coalesce(void *bp)
 
     // 전 블록의 footer의 allocate가 1이고 다음 블록의 header의 allocate가 1이라면
     if (prev_alloc && next_alloc){
+        // 
+        add_free_block(bp);
         // 그냥 bp 리턴(똑같은거 다시 돌려보네주기)
         return bp;
     }
 
     // 전블록의 footer의 allocate가 1이고 다음 블록의 header의 allocate가 0이라면
     else if (prev_alloc && !next_alloc){
+        splice_free_block(NEXT_BLKP(bp));
         // 현재 블록 사이즈에 다음 헤더의 블록 사이즈만큼 추가
         size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
         // 현재 헤더에 더한 size 더한 값 집어넣기
@@ -168,6 +184,7 @@ static void *coalesce(void *bp)
 
     // 전블록의 footer의 allocate가 0이고 다음 블록의 header의 allocate가 1이라면
     else if (!prev_alloc && next_alloc){
+        splice_free_block(PREV_BLKP(bp)); // 가용 블록을 free_list에서 제거
         // 현재 블록 사이즈에 이전 헤더의 블록 사이즈 만큼 추가
         size += GET_SIZE(HDRP(PREV_BLKP(bp)));
         // 현재 footer의 사이즈 재조정 후 allocate 0으로 조정
@@ -180,6 +197,8 @@ static void *coalesce(void *bp)
 
     // 전 블록의 footer와 다음 블록의 header의 allocate가 둘다 0이라면
     else {
+        splice_free_block(PREV_BLKP(bp)); // 이전 가용 블록을 free_list에서 제거
+        splice_free_block(NEXT_BLKP(bp)); // 다음 가용 블록을 free_list에서 제거
         // 사이즈를 이전 블록의 사이즈와 이후 블록의 사이즈를 더함. 총(이전+현재+다음) 블록 사이즈
         size += GET_SIZE(HDRP(PREV_BLKP(bp))) + GET_SIZE(FTRP(NEXT_BLKP(bp)));
         // 전 블록의 헤더에 사이즈를 바꿔줌
@@ -190,6 +209,7 @@ static void *coalesce(void *bp)
         // 이전의 헤더 WSIZE 추가의 포인터를 bp로 설정
         bp = PREV_BLKP(bp);
     }
+    add_free_block(bp);
     return bp;
 }
 
@@ -261,21 +281,27 @@ void *mm_malloc(size_t size)
 
 static void *find_fit(size_t asize)
 {
-    void *bp;
-
-    // bp는 heaplistp, 얻은 사이즈가 0보다 클때까지, bp는 다음 블록으로
-    for (bp = heap_listp; GET_SIZE(HDRP(bp))>0; bp = NEXT_BLKP(bp)){
-        // 만약 확인하는 블록에 할당이 안되있고, asize보다 크기가 더 크다면,
-        if(!GET_ALLOC(HDRP(bp))&&(asize <= GET_SIZE(HDRP(bp)))){
-            // 이 포인터(주소)를 리턴.
-            return bp; 
-        }
+    // bp를 처음으로 설정.
+    void *bp = heap_listp;
+    
+    //bp가 Null 값이 아닐때 까지
+    while (bp!=NULL)
+    {   
+        // 만약 할당할 사이즈가 현재 확인할 사이즈보다 작을 때
+        // explicit에서는 할당블록만 확인하기 때문에 allocate를 확인안해도 되유
+        if((asize <= GET_SIZE(HDRP(bp))))
+            // 이것을 리턴한다
+            return bp;
+        // 다음 후보 값으로 바꿈
+        bp = GET_SUCC(bp);
     }
     return NULL;
 }
 
 static void place(void *bp, size_t asize)
 {
+    //free_list에서 해당 블록 제거 - 공부중
+    splice_free_block(bp);
     // 현재 사이즈 설정 (그게 그말(말이 마음이고 마음이 말이다))
     size_t csize = GET_SIZE(HDRP(bp));
 
@@ -290,6 +316,8 @@ static void place(void *bp, size_t asize)
         // 다음 블록의 헤더와 푸터를 지정
         PUT(HDRP(bp), PACK(csize-asize,0));
         PUT(FTRP(bp),PACK(csize-asize,0));
+        // 남은 블록을 free_list에 추가 - 공부중
+        add_free_block(bp);
     }
     // csize와 asize가 완전히 크기가 같다면
     else{
@@ -328,4 +356,30 @@ void *mm_realloc(void *ptr, size_t size)
     // 전에 있던 블록의 할당은 0으로
     mm_free(oldptr);
     return newptr;
+}
+
+// 가용 리스트에서 bp에 해당하는 블록을 제거하는 함수
+static void splice_free_block(void *bp)
+{
+    if(bp == heap_listp)
+    {
+        heap_listp = GET_SUCC(heap_listp);
+        return;
+    }
+    GET_SUCC(GET_PRED(bp)) = GET_SUCC(bp);
+    if (GET_SUCC(bp)!=NULL)
+        GET_PRED(GET_SUCC(bp)) = GET_PRED(bp);
+}
+
+//가용 리스트의 맨 앞에 현재 블록을 추가하는 함수
+static void add_free_block(void *bp)
+{
+    //bp의 SUCC는 루트가 가리키던 블록
+    GET_SUCC(bp) = heap_listp;
+    // 만약 NULL이 아니면(있다면)
+    if(heap_listp != NULL)
+        // 루트였던 블록의 PRED를 추가된 블록으로 연결
+        GET_PRED(heap_listp) = bp;
+    //루트를 현재 블록으로 변경
+    heap_listp = bp;
 }
