@@ -107,26 +107,22 @@ static char *heap_listp; // 처음에 쓸 큰 가용블록 힙을 만들어줌
 int mm_init(void)
 {
     // 컴퓨터가 데이터가 주고받는 단위(버스)가 32byte정도기 때문에 24byte로 설정하면 8byte가 남아 또 보네줘야 하기 때문에 더 느리다.
-    if ((heap_listp = mem_sbrk(8*WSIZE)) == (void *)-1)
+    if ((heap_listp = mem_sbrk(6*WSIZE)) == (void *)-1)
         return -1;
     // alignment : heap_listp 첫번째는 0 (패딩)
     PUT(heap_listp, 0);
     // Prologue header : heap_listp + 4byte 에는 header 저장 (DSIZE, 1)
-    PUT(heap_listp + (1*WSIZE), PACK(2*WSIZE, 1));
-    // Prologue footer : heap_listp + 8byte 에는 footer 저장 (header와 같음) footer은 header와 같은 양식
-    PUT(heap_listp + (2*WSIZE), PACK(2*WSIZE, 1));
-    // 첫 가용 블록의 헤더 (header + successor, predeccessor + footer = 16)
-    PUT(heap_listp + (3*WSIZE), PACK(4*WSIZE, 0));
+    PUT(heap_listp + (1*WSIZE), PACK(4*WSIZE, 1));
     // 이전 가용 블록의 주소 - 이해중
-    PUT(heap_listp + (4*WSIZE), NULL);
+    PUT(heap_listp + (2*WSIZE), NULL);
     // 다음 가용 블록의 주소 - 이해중
-    PUT(heap_listp + (5*WSIZE), NULL);
-    // 첫 가용 블록의 푸터 헤더와 동일.
-    PUT(heap_listp + (6*WSIZE), PACK(4*WSIZE, 0));
+    PUT(heap_listp + (3*WSIZE), NULL);
+    // Prologue footer : heap_listp + 8byte 에는 footer 저장 (header와 같음) footer은 header와 같은 양식
+    PUT(heap_listp + (4*WSIZE), PACK(4*WSIZE, 1));
     // Epilogue header : heap_listp + 12byte 에는 마지막을 알려주는 size: 0, allocate : 1
-    PUT(heap_listp + (7*WSIZE), PACK(0,1));
+    PUT(heap_listp + (5*WSIZE), PACK(0,1));
     // heap_listp(나중에 bp) 가 가리키는 부분은 header와 footer의 중간으로 지정.
-    heap_listp += (4*WSIZE);
+    heap_listp += (2*WSIZE);
 
     // 두 가지 다른 경우에 호출
     // 1. 힙이 초기화 될때, 2. mm_malloc이 적당한 맞춤 fit을 찾지 못할때 -이해중
